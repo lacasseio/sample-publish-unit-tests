@@ -9,6 +9,7 @@ import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.artifacts.DependencySet;
 import org.gradle.api.attributes.Attribute;
 import org.gradle.api.attributes.Usage;
 import org.gradle.api.component.AdhocComponentWithVariants;
@@ -29,18 +30,18 @@ import org.gradle.nativeplatform.TargetMachine;
 import org.gradle.nativeplatform.test.cpp.CppTestExecutable;
 import org.gradle.nativeplatform.test.cpp.CppTestSuite;
 
+import javax.annotation.Nullable;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.util.Collections;
 import java.util.Iterator;
-import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.gradle.util.internal.DeferredUtil.unpack;
+import static java.util.Objects.requireNonNull;
 
 /**
  * A simple 'hello world' plugin.
@@ -206,7 +207,36 @@ public abstract class PublishUnitTestsPlugin implements Plugin<Project> {
                                                     });
                                                 }
                                             });
-                                            configuration.defaultDependencies(it -> it.add(project.getDependencies().create(unpack(project.getGroup()).toString() + ":" + project.getName() + capitalize(unitTest.getName()) + "_" + variantId(targetMachine) + ":" + unpack(project.getVersion()).toString())));
+                                            configuration.defaultDependencies(new Action<>() {
+                                                @Override
+                                                public void execute(DependencySet it) {
+                                                    it.add(project.getDependencies().create(requireNonNull(unpack(project.getGroup())) + ":" + project.getName() + capitalize(unitTest.getName()) + "_" + variantId(targetMachine) + ":" + requireNonNull(unpack(project.getVersion()))));
+                                                }
+
+                                                @Nullable
+                                                private Object unpack(Object obj) {
+                                                    while (obj instanceof Callable || obj instanceof Supplier) {
+                                                        if (obj instanceof Callable) {
+                                                            obj = uncheckedCall((Callable<?>) obj);
+                                                        } else if (obj instanceof Supplier) {
+                                                            obj = ((Supplier<?>) obj).get();
+                                                        }
+                                                    }
+
+                                                    if (obj instanceof Provider) {
+                                                        return ((Provider<?>) obj).get();
+                                                    }
+                                                    return obj;
+                                                }
+
+                                                private Object uncheckedCall(Callable<?> callable) {
+                                                    try {
+                                                        return callable.call();
+                                                    } catch (Exception e) {
+                                                        throw new RuntimeException(e);
+                                                    }
+                                                }
+                                            });
                                         });
                                         component.addVariantsFromConfiguration(runtimeElements, it -> { /* nothing to do */});
                                     }
