@@ -8,7 +8,6 @@ import org.gradle.api.NamedDomainObjectProvider;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.Task;
-import org.gradle.api.XmlProvider;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.attributes.Attribute;
 import org.gradle.api.attributes.AttributeContainer;
@@ -16,11 +15,11 @@ import org.gradle.api.attributes.Usage;
 import org.gradle.api.component.AdhocComponentWithVariants;
 import org.gradle.api.component.SoftwareComponent;
 import org.gradle.api.component.SoftwareComponentFactory;
+import org.gradle.api.publish.PublicationContainer;
 import org.gradle.api.publish.PublishingExtension;
-import org.gradle.api.publish.maven.MavenPom;
 import org.gradle.api.publish.maven.MavenPublication;
+import org.gradle.api.publish.maven.tasks.PublishToMavenRepository;
 import org.gradle.api.publish.tasks.GenerateModuleMetadata;
-import org.gradle.api.tasks.TaskProvider;
 import org.gradle.language.cpp.CppBinary;
 import org.gradle.nativeplatform.MachineArchitecture;
 import org.gradle.nativeplatform.OperatingSystemFamily;
@@ -32,8 +31,10 @@ import javax.inject.Inject;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.gradle.util.internal.DeferredUtil.unpack;
@@ -88,8 +89,7 @@ public abstract class PublishUnitTestsPlugin implements Plugin<Project> {
                             public void execute(GenerateModuleMetadata t) {
                                 try {
                                     Files.write(t.getOutputFile().getAsFile().get().toPath(), Files.readString(t.getOutputFile().getAsFile().get().toPath(), UTF_8).replace("\"name\": \"" + publication.getArtifactId() + "-" + publication.getVersion() + "\"", "\"name\": \"" + one(publication.getArtifacts()).getFile().getName() + "\"").getBytes(UTF_8));
-                                } catch (
-                                        IOException e) {
+                                } catch (IOException e) {
                                     throw new UncheckedIOException(e);
                                 }
                             }
@@ -163,65 +163,58 @@ public abstract class PublishUnitTestsPlugin implements Plugin<Project> {
 
             project.afterEvaluate(ignored -> {
                 project.getPluginManager().withPlugin("maven-publish", __ -> {
-                    final TaskProvider<GenerateComponentGradleModuleMetadata> generateTask = project.getTasks().register(String.format("generate%sGradleModuleMetadata", capitalize(unitTest.getName())), GenerateComponentGradleModuleMetadata.class, task -> {
-                        task.getModuleFile().convention(project.getLayout().getBuildDirectory().file(unitTest.getName() + ".module"));
-                        task.getStatus().set(project.provider(() -> unpack(project.getStatus())).map(Object::toString));
-                    });
-
-
                     PublishingExtension publishing = project.getExtensions().getByType(PublishingExtension.class);
-                    publishing.publications(publications -> {
-                        // When multiple unit tests binary, prepare an aggregate publication
-                        if (publications.findByName(unitTest.getName()) == null) {
-                            for (TargetMachine targetMachine : unitTest.getTargetMachines().get()) {
-                                generateTask.configure(task -> {
-                                    task.getVariants().create(unitTest.getName() + capitalize(targetMachine.getOperatingSystemFamily().getName()) + capitalize(targetMachine.getArchitecture().getName()) + "RuntimeElements", variant -> {
-                                        variant.attribute(Usage.USAGE_ATTRIBUTE, project.getObjects().named(Usage.class, Usage.NATIVE_RUNTIME));
-                                        variant.attribute(MachineArchitecture.ARCHITECTURE_ATTRIBUTE, targetMachine.getArchitecture());
-                                        variant.attribute(OperatingSystemFamily.OPERATING_SYSTEM_ATTRIBUTE, targetMachine.getOperatingSystemFamily());
-                                        variant.attribute(CppBinary.OPTIMIZED_ATTRIBUTE, false);
-                                        variant.attribute(CppBinary.DEBUGGABLE_ATTRIBUTE, true);
-                                        variant.attribute(TEST_SUITE_NAME_ATTRIBUTE, unitTest.getName());
-                                        variant.attribute(TEST_SUITE_TYPE_ATTRIBUTE, UNIT_TEST);
-                                        variant.getArtifactId().set(project.getName() + capitalize(unitTest.getName()) + "_" + variantId(targetMachine));
-                                    });
+                    publishing.publications(new Action<>() {
+                        @Override
+                        public void execute(PublicationContainer publications) {
+                            // When multiple unit tests binary, prepare an aggregate publication
+                            if (publications.findByName(unitTest.getName()) == null) {
+                                SoftwareComponent testComponent = newSoftwareComponent(unitTest.getName(), component -> {
+                                    for (TargetMachine targetMachine : unitTest.getTargetMachines().get()) {
+                                        final Configuration runtimeElements = project.getConfigurations().maybeCreate(unitTest.getName() + capitalize(targetMachine.getOperatingSystemFamily().getName()) + capitalize(targetMachine.getArchitecture().getName()) + "RuntimeElements");
+                                        project.getConfigurations().getByName(unitTest.getName() + capitalize(targetMachine.getOperatingSystemFamily().getName()) + capitalize(targetMachine.getArchitecture().getName()) + "RuntimeElements", configuration -> {
+                                            configuration.setVisible(false);
+                                            project.getTasks().withType(PublishToMavenRepository.class).configureEach(task -> {
+                                                if (task.getName().startsWith("publish" + capitalize(unitTest.getName()) + "Publication")) {
+                                                    task.dependsOn((Callable<Object>) () -> {
+                                                        configuration.setCanBeResolved(false);
+                                                        configuration.setCanBeConsumed(true);
+                                                        configuration.attributes(attributes -> {
+                                                            attributes.attribute(Usage.USAGE_ATTRIBUTE, project.getObjects().named(Usage.class, Usage.NATIVE_RUNTIME));
+                                                            attributes.attribute(MachineArchitecture.ARCHITECTURE_ATTRIBUTE, targetMachine.getArchitecture());
+                                                            attributes.attribute(OperatingSystemFamily.OPERATING_SYSTEM_ATTRIBUTE, targetMachine.getOperatingSystemFamily());
+                                                            attributes.attribute(CppBinary.OPTIMIZED_ATTRIBUTE, false);
+                                                            attributes.attribute(CppBinary.DEBUGGABLE_ATTRIBUTE, true);
+                                                            attributes.attribute(TEST_SUITE_NAME_ATTRIBUTE, unitTest.getName());
+                                                            attributes.attribute(TEST_SUITE_TYPE_ATTRIBUTE, UNIT_TEST);
+                                                        });
+                                                        return Collections.emptyList();
+                                                    });
+                                                }
+                                            });
+                                            configuration.defaultDependencies(it -> it.add(project.getDependencies().create(unpack(project.getGroup()).toString() + ":" + project.getName() + capitalize(unitTest.getName()) + "_" + variantId(targetMachine) + ":" + unpack(project.getVersion()).toString())));
+                                        });
+                                        component.addVariantsFromConfiguration(runtimeElements, it -> { /* nothing to do */});
+                                    }
+                                });
+
+                                publications.create(unitTest.getName(), MavenPublication.class, publication -> {
+                                    publication.from(testComponent);
                                 });
                             }
 
-                            publications.create(unitTest.getName(), MavenPublication.class, publication -> {
-                                publication.artifact(generateTask);
-                                publication.pom(new Action<>() {
-                                    @Override
-                                    public void execute(MavenPom pom) {
-                                        pom.setPackaging("pom");
-                                        pom.withXml(withGradleModuleMetadataRedirectComment()); // force module redirection comment
-                                    }
-
-                                    private Action<XmlProvider> withGradleModuleMetadataRedirectComment() {
-                                        return xml -> {
-                                                final int idx = xml.asString().indexOf("  <modelVersion>");
-                                                xml.asString().insert(idx, String.join("\n",
-                                                        "<!-- This module was also published with a richer model, Gradle metadata,  -->",
-                                                        "<!-- which should be used instead. Do not delete the following line which  -->",
-                                                        "<!-- is to indicate to Gradle or any Gradle module metadata file consumer  -->",
-                                                        "<!-- that they should prefer consuming it instead. -->",
-                                                        "<!-- do_not_remove: published-with-gradle-metadata -->"));
-		                                };
-                                    }
-                                });
-                                generateTask.configure(task -> {
-                                    task.getGroupId().set(project.provider(publication::getGroupId));
-                                    task.getArtifactId().set(project.provider(publication::getArtifactId));
-                                    task.getVersion().set(project.provider(publication::getVersion));
-                                    task.getModuleFile().set(project.getLayout().getBuildDirectory().file(task.getArtifactId().map(it -> it + ".module")));
-                                });
+                            // Override artifactId for both the single variant or multi-variant
+                            publications.named(unitTest.getName(), MavenPublication.class, publication -> {
+                                publication.setArtifactId(project.getName() + capitalize(unitTest.getName()));
                             });
                         }
 
-                        // Override artifactId for both the single variant or multi-variant
-                        publications.named(unitTest.getName(), MavenPublication.class, publication -> {
-                            publication.setArtifactId(project.getName() + capitalize(unitTest.getName()));
-                        });
+                        private SoftwareComponent newSoftwareComponent(String name, Action<? super AdhocComponentWithVariants> action) {
+                            AdhocComponentWithVariants component = project.getObjects().newInstance(SoftwareComponentFactoryProvider.class).get().adhoc(name);
+                            action.execute(component);
+                            project.getComponents().add(component);
+                            return component;
+                        }
                     });
                 });
             });
