@@ -186,8 +186,9 @@ public abstract class PublishUnitTestsPlugin implements Plugin<Project> {
                             if (publications.findByName(unitTest.getName()) == null) {
                                 SoftwareComponent testComponent = newSoftwareComponent(unitTest.getName(), component -> {
                                     for (TargetMachine targetMachine : unitTest.getTargetMachines().get()) {
-                                        final Configuration runtimeElements = project.getConfigurations().maybeCreate(unitTest.getName() + capitalize(targetMachine.getOperatingSystemFamily().getName()) + capitalize(targetMachine.getArchitecture().getName()) + "RuntimeElements");
-                                        project.getConfigurations().getByName(unitTest.getName() + capitalize(targetMachine.getOperatingSystemFamily().getName()) + capitalize(targetMachine.getArchitecture().getName()) + "RuntimeElements", configuration -> {
+                                        final String name = unitTest.getName() + capitalize(targetMachine.getOperatingSystemFamily().getName()) + capitalize(targetMachine.getArchitecture().getName());
+                                        final Configuration runtimeElements = project.getConfigurations().create(unitTest.getName() + capitalize(targetMachine.getOperatingSystemFamily().getName()) + capitalize(targetMachine.getArchitecture().getName()) + "RuntimeElements", configuration -> {
+                                            configuration.setDescription(String.format("Runtime elements for publishing C++ test executable '%s'.", name));
                                             configuration.setVisible(false);
                                             project.getTasks().withType(PublishToMavenRepository.class).configureEach(task -> {
                                                 if (task.getName().startsWith("publish" + capitalize(unitTest.getName()) + "Publication")) {
