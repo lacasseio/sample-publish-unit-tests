@@ -10,11 +10,13 @@ import org.gradle.api.Project;
 import org.gradle.api.Task;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.attributes.Attribute;
-import org.gradle.api.attributes.AttributeContainer;
 import org.gradle.api.attributes.Usage;
 import org.gradle.api.component.AdhocComponentWithVariants;
 import org.gradle.api.component.SoftwareComponent;
 import org.gradle.api.component.SoftwareComponentFactory;
+import org.gradle.api.plugins.ExtensionAware;
+import org.gradle.api.plugins.ExtraPropertiesExtension;
+import org.gradle.api.provider.Provider;
 import org.gradle.api.publish.PublicationContainer;
 import org.gradle.api.publish.PublishingExtension;
 import org.gradle.api.publish.maven.MavenPublication;
@@ -35,6 +37,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.gradle.util.internal.DeferredUtil.unpack;
@@ -55,22 +58,33 @@ public abstract class PublishUnitTestsPlugin implements Plugin<Project> {
                     configuration.setCanBeResolved(false);
                     configuration.setCanBeConsumed(true);
                     configuration.setDescription(String.format("Runtime elements for C++ test executable '%s'", qualifyingName(binary)));
-                    configuration.attributes(copyFromNativeRuntime());
                     configuration.attributes(attributes -> {
+                        attributes.attribute(Usage.USAGE_ATTRIBUTE, project.getObjects().named(Usage.class, Usage.NATIVE_RUNTIME));
+                        attributes.attribute(MachineArchitecture.ARCHITECTURE_ATTRIBUTE, binary.getTargetMachine().getArchitecture());
+                        attributes.attribute(OperatingSystemFamily.OPERATING_SYSTEM_ATTRIBUTE, binary.getTargetMachine().getOperatingSystemFamily());
+                        attributes.attributeProvider(CppBinary.DEBUGGABLE_ATTRIBUTE, providerOf(binary, "debuggable", binary::isDebuggable));
+                        attributes.attributeProvider(CppBinary.OPTIMIZED_ATTRIBUTE, providerOf(binary, "optimized", binary::isOptimized));
                         attributes.attribute(TEST_SUITE_NAME_ATTRIBUTE, unitTest.getName());
                         attributes.attribute(TEST_SUITE_TYPE_ATTRIBUTE, UNIT_TEST);
                     });
                     configuration.getOutgoing().artifact(binary.getExecutableFile());
                 }
 
-                @SuppressWarnings({"rawtypes", "unchecked"})
-                private Action<AttributeContainer> copyFromNativeRuntime() {
-                    return attributes -> {
-                        final Configuration nativeRuntime = project.getConfigurations().getByName("nativeRuntime" + capitalize(qualifyingName(binary)));
-                        for (Attribute attribute : nativeRuntime.getAttributes().keySet()) {
-                            attributes.attribute(attribute, Objects.requireNonNull(nativeRuntime.getAttributes().getAttribute(attribute)));
+                private <T> Provider<T> providerOf(Object thiz, String extName, Supplier<T> defaultValue) {
+                    return project.provider(() -> {
+                        if (thiz instanceof ExtensionAware) {
+                            ExtraPropertiesExtension ext = ((ExtensionAware) thiz).getExtensions().getExtraProperties();
+                            if (ext.has(extName)) {
+                                @SuppressWarnings("unchecked")
+                                T result = (T) ext.get(extName);
+                                return result;
+                            } else {
+                                return null;
+                            }
+                        } else {
+                            return null;
                         }
-                    };
+                    }).orElse(project.provider(defaultValue::get));
                 }
             });
         };
