@@ -35,3 +35,7 @@ $ ./gradlew verify -PdependencyType=binary
 
 BUILD SUCCESSFUL
 ```
+
+## Limitation
+
+- Because there is no way of knowing what will be the build type of the test component, some synchronization will be required against [this sample](https://github.com/lacasseio/sample-cpp-unit-test-uses-release-variant).
