@@ -1,0 +1,12 @@
+pluginManagement {
+    includeBuild 'plugin'
+}
+
+rootProject.name = 'sample-publish-unit-tests'
+include 'app', 'lib'
+include 'test-aggregator'
+
+gradle.allprojects {
+    group = 'com.example.samples'
+    version = '1.2'
+}

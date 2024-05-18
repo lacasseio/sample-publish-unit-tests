@@ -1,0 +1,28 @@
+plugins {
+    // Apply the cpp-application plugin to add support for building C++ executables
+    id 'cpp-application'
+
+    // Apply the cpp-unit-test plugin to add support for building and running C++ test executables
+    id 'cpp-unit-test'
+
+    id 'maven-publish'
+    id 'com.example.publish-unit-tests'
+}
+
+// Set the target operating system and architecture for this application
+application {
+    targetMachines = [machines.windows, machines.macOS, machines.linux]
+    dependencies {
+        implementation project(':lib')
+    }
+}
+
+unitTest {
+    targetMachines = [machines.windows, machines.macOS, machines.linux]
+}
+
+publishing {
+    repositories {
+        maven { url = '../repo' }
+    }
+}

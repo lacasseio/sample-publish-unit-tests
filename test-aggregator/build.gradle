@@ -1,0 +1,46 @@
+configurations {
+    testExecutables {
+        canBeConsumed = false
+        canBeResolved = true
+        attributes {
+            attributes.attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage, Usage.NATIVE_RUNTIME))
+            attributes.attribute(OperatingSystemFamily.OPERATING_SYSTEM_ATTRIBUTE, objects.named(OperatingSystemFamily, OperatingSystemFamily.MACOS))
+        }
+    }
+}
+
+repositories {
+    maven { url = '../repo' }
+}
+
+dependencies {
+    switch (providers.gradleProperty('dependencyType').getOrNull()) {
+        case 'project':
+            testExecutables(project(':app')) {
+                attributes {
+                    it.attribute(Attribute.of("com.example.testsuite.name", String), "test")
+                }
+            }
+            testExecutables(project(':lib')) {
+                attributes {
+                    it.attribute(Attribute.of("com.example.testsuite.name", String), "test")
+                }
+            }
+            break
+        case 'binary':
+            testExecutables 'com.example.samples:appTest:1.2'
+            testExecutables 'com.example.samples:libTest:1.2'
+            break
+        default:
+            println "please specify a '-PdependencyType=[project|binary]' to use in :test-aggregator"
+    }
+
+}
+
+tasks.register('verify') {
+    doLast {
+        configurations.testExecutables.each {
+            println it
+        }
+    }
+}

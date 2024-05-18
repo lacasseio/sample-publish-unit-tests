@@ -1,0 +1,13 @@
+plugins {
+    id 'java-gradle-plugin'
+}
+
+gradlePlugin {
+    // Define the plugin
+    plugins {
+        publishUnitTests {
+            id = 'com.example.publish-unit-tests'
+            implementationClass = 'com.example.PublishUnitTestsPlugin'
+        }
+    }
+}
